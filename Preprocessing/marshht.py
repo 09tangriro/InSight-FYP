@@ -52,8 +52,8 @@ class marsHHT:
     def __get_bin(self,freq,n_bins,bins):
         if freq < 0:
             return -1
-        ratio = int(n_bins/bins[len(bins)-1])
-        index = int(freq*ratio)
+        ratio = n_bins/bins[-1]
+        index = int(freq*ratio)-1
         return index
 
     def __check_inputs(self,imfs):
@@ -62,50 +62,75 @@ class marsHHT:
         else: 
             return 1
 
-    def __get_freq_amp(self,imf,fs):
+    def __get_phase_freq_amp(self,imf,fs):
         x_a = signal.hilbert(imf)
-        p = np.unwrap(np.angle(x_a))
+        inst_p = np.angle(x_a)
+        p = np.unwrap(inst_p)
+        inst_p[inst_p < 0] += np.pi
         inst_f = np.diff(p)/(2*np.pi)*fs #diff[i] = a[i+1] - a[i]
         inst_a = np.abs(x_a)[:len(imf)-1] 
-        return inst_f,inst_a
+        return inst_p,inst_f,inst_a
 
-    def hht(self, imfs, fs=100, n_freq=201):
+    def hht(self, imfs, fs=1, n_bins=201, mode='freq'):
         if len(imfs.shape) == 1:
-            t = np.arange(len(imfs)-1)
+            if mode == 'freq': t = np.arange(len(imfs)-1)
+            if mode == 'phase': t = np.arange(len(imfs)) 
         else:
-            t = np.arange(len(imfs[0])-1)
-        f = np.linspace(0,int(fs/2),n_freq)
+            if mode == 'freq': t = np.arange(len(imfs[0])-1)
+            if mode == 'phase': t = np.arange(len(imfs[0]))
+        f = np.linspace(0,fs/2,n_bins)
+        p = np.linspace(0,np.pi,n_bins)
         A = [[0 for i in range(len(t))] for j in range(len(f))]
+        inst_p = [None]*(len(imfs))
         inst_a = [None]*(len(imfs))
         inst_f = [None]*(len(imfs))
 
         if len(imfs.shape) == 1:
-            inst_f,inst_a = self.__get_freq_amp(imfs,fs)
+            inst_p,inst_f,inst_a = self.__get_phase_freq_amp(imfs,fs)
             for i,c in enumerate(inst_a):
-                freq = inst_f[i]
-                freq_bin = self.__get_bin(freq,n_freq,f)
-                if freq_bin != -1:
-                    A[freq_bin][i] += c
+                if mode == 'freq':
+                    freq = inst_f[i]
+                    freq_bin = self.__get_bin(freq,n_bins,f)
+                    if freq_bin != -1:
+                        A[freq_bin][i] += c
+                if mode == 'phase':
+                    phase = inst_p[i]
+                    phase_bin = self.__get_bin(phase,n_bins,p)
+                    if phase_bin != -1:
+                        A[phase_bin][i] += c
         else:
             for i,imf in enumerate(imfs):
-                inst_f[i],inst_a[i] = self.__get_freq_amp(imf,fs)
+                inst_p[i],inst_f[i],inst_a[i] = self.__get_phase_freq_amp(imf,fs)
             for i,r in enumerate(inst_a):
                 for j,c in enumerate(r):
-                    freq = inst_f[i][j]
-                    freq_bin = self.__get_bin(freq,n_freq,f)
-                    if freq_bin != -1:
-                        A[freq_bin][j] += c
+                    if mode == 'freq':
+                        freq = inst_f[i][j]
+                        freq_bin = self.__get_bin(freq,n_bins,f)
+                        if freq_bin != -1:
+                            A[freq_bin][j] += c
+                    if mode == 'phase':
+                        phase = inst_p[i][j]
+                        phase_bin = self.__get_bin(phase,n_bins,p)
+                        if phase_bin != -1:
+                            A[phase_bin][j] += c 
         A = np.array(A)
+        if mode == 'phase': f = p
         return A,f,t
 
-    def plot_hs(self,A,f,t,title='Hilbert Spectrum',mode='log',fs=100):
+    def plot_hs(self,A,f,t,title='Hilbert Spectrum',mode='log',fs=1):
         if mode == 'log': A = np.log(A)
         if mode == 'sqrt': A = np.log(np.sqrt(A))
         cmap = plt.pcolormesh(t/fs, f, A, cmap = 'jet')
         plt.colorbar(cmap)
         plt.title(title)
-        plt.xlabel('Time [s]')
-        plt.ylabel('Frequency[Hz]')
+        if fs != 1:
+            plt.xlabel('Time [s]')
+        else:
+            plt.xlabel('Sample Number')
+        if f[-1] == np.pi:
+            plt.ylabel('Phase [rads]')
+        else:
+            plt.ylabel('Frequency[Hz]')
         plt.show()
 
     def get_corr(self,sig,imfs):
